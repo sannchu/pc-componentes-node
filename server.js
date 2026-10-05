@@ -24,7 +24,14 @@
 
     */  
 //#endregion
+require('dotenv').config(); //<--- el modulo "dotenv" exporta un objeto que tiene un metodo "config()" que al ejecutarlo
+                            //lee el archivo ".env" y asigna a process.env las variables de entorno definidas en el mismo   
 
+const mongodb=require('mongodb');   //<--- el modulo "mongodb" exporta un objeto que asignamos a variable "mongodb"
+                                    //que contiene la clase MongoClient que nos permite conectarnos a un servidor de base de datos MongoDB y realizar operaciones CRUD sobre las colecciones de la base de datos
+
+const clienteConexionMongoDB=new mongodb.MongoClient(process.env.MONGODB_URL); //<--- creamos un objeto cliente de conexion a MongoDB
+                                                                                    // cadena de conexion: 'mongodb://<host>:<port>' (por defecto host=localhost, port=27017)   
 const express=require('express'); //<--- el modulo "express" exporta una funcion que asignamos a variable "express",
 //que al ejecutarla nos devuelve un objeto Application de Express:
 // https://expressjs.com/en/5x/api/application/
@@ -66,10 +73,39 @@ webServer.use(cokieParser()); //<--- middleware que analiza las cookies de la pe
 
 webServer.use(cors()); //<--- middleware que permite el acceso a la API desde cualquier origen (CORS: Cross-Origin Resource Sharing)
 
-webServer.get('/api/Tienda/Categorias', function(req, res) {
-    res.status(200).send('Ahora mismo te mando las CATEGORIAS.....');
+webServer.get(
+    '/api/Tienda/Categorias',
+    async function(req,res,next){
+        try{
+            console.log(`Peticion entrante: ${req.method} ${req.url}`);
+            //1º paso: conectarme a la BD, usando un cliente de conexion a MongoDB: mongodb<--- driver nativo para nodejs de mongodb
+            await clienteConexionMongoDB.connect();
+            //2º paso: ejecutar la consulta a la BD de Mongodb para recuperar las categorias de productos(en un principio
+            //solo quiero las principales o raices, es decir, las q no tienen padre por encima)
+            // <--- query: db['PcComponentes'].categorias.find( { tipo:'...' } ) 
+            // <==== resultado: array de objetos a devolver al cliente en variable _categorias
+            let _queryRegExp=/^\d+$/
+            let __categorias=await clienteConexionMongoDB.db(process.env.MONGODB_DB_NAME)
+                                                        .collection('categorias')
+                                                        .find({ pathCat: { $regex: _queryRegExp } })
+                                                        .toArray();                                                        
+            //3º paso: devolver la respuesta al cliente con el resultado de la operacion contra la BD
+            console.log('Categorias recuperadas de la BD: ', __categorias);
 
-});
+            res.status(200).send(
+                {
+                    codigo:0, //<----- codigo de resultado de la operacion contra la bd, si es 0=ok, en caso contrario sera un error
+                    mensaje:'categorias recuperadas correctametne',
+                    categorias:__categorias
+                }
+            );
+
+        } catch(error){
+            console.log(`Error al recuperar categorias de la BD: ${error}`);
+            res.status(200).send( { codigo: 1, mensaje: `Error al recuperar categorias de la BD: ${error}`, categorias:[] } );
+        }
+    }
+) 
 
 // Responde a las peticiones que no coinciden con ninguna ruta.
 webServer.use(function(req, res) {
