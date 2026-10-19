@@ -51,8 +51,12 @@ const cookieParser=require('cookie-parser'); //<--- el modulo "cookie-parser" ex
 const cors=require('cors'); //<--- el modulo "cors" exporta una funcion que asignamos a variable "cors",
 const jsonwebtoken=require('jsonwebtoken');  //<--- modulo para crear JWT de sesion de usuario
 const bcrypt=require('bcrypt'); //<--- modulo para hashear y comprobar hashes de passwords de usuarios
+const crypto=require('node:crypto'); //<--- genera el estado temporal para proteger el flujo OAuth
 
 const webServer=express();
+const GOOGLE_FRONTEND_CALLBACK_URL=process.env.GOOGLE_OAUTH2_FRONTEND_CALLBACK_URL
+    || 'http://localhost:5173/Cliente/LoginGoogleCallback';
+const GOOGLE_FRONTEND_ORIGIN=new URL(GOOGLE_FRONTEND_CALLBACK_URL).origin;
 
 //------------------------------------ CONFIG PIPELINE: miiddleware-stack de express ---------------------------------------------
 // webServer.use(
@@ -74,7 +78,10 @@ webServer.use( cookieParser() ); //<---- 3Âº funcion middleware, extrae las co
                                 //crea un objeto JS: {nombreCookie: valor, ...} y lo mete en prop. "req.cookies"
 
 
-webServer.use( cors() ); //<---- 4Âº funcion middleware, habilita CORS
+webServer.use(cors({
+    origin: process.env.CORS_ORIGIN || GOOGLE_FRONTEND_ORIGIN,
+    credentials: true
+}));
 
 
 webServer.get(
@@ -130,9 +137,10 @@ webServer.post
             if(! _usuario) throw new Error('No existe un usuario con ese email');
             console.log('Usuario recuperado de la BD: ', _usuario);
 
-            //2Âº paso: si existe, comprobar si el hash q tiene almacenado coincide con el hash usando
-bcrypt.compare()
+            //2Âº paso: si existe, comprobar si el hash q tiene almacenado coincide con el hash usandobcrypt.compare()
             //         de la password q me ha enviado ... SI NO ---> error de password incorrecta
+            // TODO: si el usuario no ha activado su cuenta, no permitir login y devolver error de cuenta no activada
+            // Tenmos que activarla
             if (! bcrypt.compareSync(password, _usuario.cuenta.password) ) throw new Error('Password incorrecta');
 
             //3Âº paso: crear JWT con los datos del usuario que me interesen preservar en la sesion y
@@ -156,49 +164,328 @@ bcrypt.compare()
 
 
 
-webServer.post(
+webServer.post
+(
     '/api/Cliente/Registro',
-    async function(req, res, next){
+    async function(req,res,next){
         try{
-            //en req.body la funcion middleware express.json() ha metido el objeto { email: '....', password: '...'}
+            //en req.body la funcion middleware express.json() ha metido el objeto { nombre: '....', email: '...', password: '...'}
             //para procesarlo en este endpoint
-            const { email, password, nombre } = req.body;
-            //1º paso: conectarme a la bd y comprobar si ya existe un usuario con ese email....
-            //         SI YA EXISTE --> error de email ya registrado
+            const { nombre, email, password } = req.body;
+
+            //1º paso: contectarme a la BD y comprobar si ya existe un usuario con ese email, si existe --> error
             await clienteConexionMongoDB.connect();
-            const _usuario=await clienteConexionMongoDB.db(process.env.MONGODB_DBNAME)
+
+            const _clienteExiste=await clienteConexionMongoDB.db(process.env.MONGODB_DBNAME)
                                                         .collection('clientes')
-                                                        .findOne({ 'cuenta.email': email });
+                                                        .findOne({'cuenta.emaail': email});
+            if(_clienteExiste) throw new Error('Ya existe un usuario con ese email');
+            
+            //2º paso: si no existe, hashear la password con brcrypt.hashSync() y almacenar datos en coleccion "clientes"  de la BD
+            const _resultadoInsert=await clienteConexionMongoDB.db(process.env.MONGODB_DBNAME)
+                                                        .collection('clientes')
+                                                        .insertOne(
+                                                            {
+                                                                nombre: nombre,
+                                                                apellidos:'',
+                                                                cuenta:{
+                                                                    email: email,
+                                                                    password: bcrypt.hashSync(password, 10), //<--- hash de la password con 10 rondas de sal
+                                                                    activada: false,
+                                                                    telefono:''
+                                                                },
+                                                                direcciones:[],
+                                                                listaFavoritos:[],
+                                                                pedidos:[]
+                                                            }
+                                                        );
+            console.log('Resultado de la insercion en la BD: ', _resultadoInsert);
+            if( ! _resultadoInsert.insertedId ) throw new Error('No se ha podido insertar el cliente en la BD');
 
-            if(_usuario) throw new Error('Ya existe un usuario con ese email');
-            console.log('Usuario no encontrado en la BD');
+            //3º paso: generar un JWT de uso unico (caducidad muy breve) y mandarlo por email al cliente para que 
+            //         confirme su registro, para ello se puede usar un servicio de envio de emails como nodemailer, sendgrid, etc
+            /*
+                            ENVIO DE EMAILS CON MAILJET USANDO SU API-REST
+                            
+                https://dev.mailjet.com/openapi/openapi-mailjet/send-emails/postsendv3
 
-            //2º paso: si no existe, crear un nuevo usuario con los datos proporcionados
-            const _nuevoUsuario = {
-                nombre: nombre,
-                cuenta: {
-                    email: email,
-                    password: bcrypt.hashSync(password, 10) // encriptar la password antes de guardarla
+                necesario:
+                    - crear cuenta en mailjet.com y obtener claves publicas y privadas para usar su API-REST
+                    - mandar cada vez q hagas peticion a endpoint de mailjet una cabecera de autentificacion HTTP-BASIC
+                      con este formato: 
+                           Authorization: Basic <base64(publicKey:privateKey)>
+                    - url o endpoint a invocar por POST: https://api.mailjet.com/v3/send
+
+                    - en body de la peticion POST hay q enviar un JSON  con este formato
+                      (añadir cabecera Content-Type: application/json):
+
+                      {
+                        "FromEmail":"pilot@mailjet.com", <------ email de registro en mailjet.com
+
+                        "FromName":"Your Mailjet Pilot", <----- nombre de registro en mailjet.com
+ 
+                        "Recipients":[
+                            {
+                            "Email":"passenger@mailjet.com", <---- email del cliente q esta registrando
+                            "Name":"Passenger 1" <---------------- nombre del cliente
+                            }
+                        ],
+                        "Subject":"Your email flight plan!", <---- asunto del email
+                        "Html-part":"<h3>Dear passenger, welcome to Mailjet!</h3><br />May the delivery force be with you!"
+                        }
+
+
+            */
+            const _codeBase64MailjetKeys=Buffer.from(`${process.even.MAILJET_PUBLIC_KEY}:${process.env.MAILJET_PRIVATE_KEY}`)
+                                              .toString('base64');
+
+            const _tokenActivacion=jsonwebtoken.sign(
+                { email: email, _id: _resultadoInsert.insertedId },
+                process.env.JWT_SECRET,
+                { expiresIn: '10m' } //<--- el token expira en 10 minutos, hay q comprobar su caducidad en el endpoint de activacion de cuenta
+            );
+            
+            const _bodyEmail={
+                        "FromEmail":"pamaruiz69@gmail.com",
+                        "FromName":"Administrador de PcComponentes", 
+                        "Recipients":[
+                            {
+                            "Email": email, 
+                            "Name": nombre
+                            }
+                        ],
+                        "Subject":"Bienvenido a PcComponentes, confirma tu registro!",
+                        "Html-part":`
+                            <div>
+                                <h1>Bienvendio a PcComponentes, ${nombre}</h1>                                
+                            </div>
+                            <div>
+                                <p>Gracias por registrarte en PcComponentes. Tu cuenta ha sido creada correctamente.</p>
+                                <p>Para activar tu cuenta, por favor haz clic en el siguiente enlace:</p>
+                                <p>
+                                    enlace:
+                                    <a href="http://localhost:3000/api/Cliente/ActivarCuenta?token=${_tokenActivacion}&email=${email}&idCliente=${_resultadoInsert.insertedId}">
+                                        Activar cuenta
+                                    </a>
+                                </p>
+                                
+                            </div>
+
+                        `
+                        }                    
+            
+            const _peticionMailjet=await fetch(
+                'https://api.mailjet.com/v3/send',
+                {
+                    method: 'POST',
+                    headers:{
+                        'Authorization': 'Basic ' + _codeBase64MailjetKeys,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(_bodyEmail) //<--- serializamos el objeto JSON a string para enviarlo en el body de la peiticion
                 }
-            };
+            );
+            console.log('Resultado de la peticion a Mailjet: ', _peticionMailjet); //codigo respuesta, cabeceras respuesta, body respuesta
+            if( _peticionMailjet.status !== 201 ) throw new Error(`Error al enviar email de activacion de cuenta al email: ${email}`);
+            
+            //4º paso: generar respuesta al cliente con el resultado de la operacion registro para q revise su bandeja de entrada
+            //         y confirme su registro con el link q le hemos enviado por email
+            res.status(200)
+                .send(
+                    {
+                        codigo:0, 
+                        mensaje:'Cliente registrado correctamente, revisa tu bandeja de entrada para confirmar tu cuenta'
+                    }
+        );
+        }catch(error){
+            console.log(`Error al registrar cliente en la BD: ${error}`);
+            res.status(200).send( { codigo: 1, mensaje: `Error al registrar cliente en la BD: ${error}` } );
+        }
+    }
+) 
 
-            const _resultado=await clienteConexionMongoDB.db(process.env.MONGODB_DBNAME)
-                                                        .collection('clientes')
-                                                        .insertOne(_nuevoUsuario);
 
-            if(!_resultado) throw new Error('Error al crear el nuevo usuario');
+webServer.get(
+    '/api/Cliente/ActivarCuenta',
+    async function(req,res,next){
+        try{
+            //en el querystring de la solicitud por get vienen estos datos:
+            // http://localhost:3000/api/Cliente/ActivarCuenta? token=.... & email=.... & idCliente=....
+            // el middleware express.urlencoded() lo lee y lo mete en "req.query" como un objeto js: 
+            // { token: '...', email: '...', idCliente: '...' }
+            const { token, email, idCliente } = req.query;
 
-            res.status(200).send({ codigo:0, mensaje:'Registro correcto', usuario: _nuevoUsuario });
+            //1º paso: comprobar q el token es valido y no ha caducado, para ello usamos jsonwebtoken.verify()
+            
+            const _tokenValido = jsonwebtoken.verify(token, process.env.JWT_SECRET); 
+            const { email: tokenEmail, id: tokenId } = _tokenValido;
+
+            //2º paso: si el token es valido, extraer su payload y comprobar q los claims q lleva de email e idCliente
+            //         coinciden con los q vienen en el querystring, si no coinciden --> error
+            if (tokenEmail !== email || tokenId !== idCliente) {
+                throw new Error('El token no coincide con el email o idCliente proporcionados');
+            }
+            //3º paso: si coinciden, conectarme a la BD y actualizar el campo "cuenta.activada" del cliente a true
+            await clienteConexionMongoDB.connect();
+
+            await db.collection('clientes').updateOne( //
+                { _id: idCliente },
+                { $set: { 'cuenta.activada': true } }
+            );
+
+            //4º paso: generar respuesta al cliente con el resultado de la operacion activacion de cuenta
+            res.status(200).send( { codigo: 0, mensaje: 'Cuenta activada correctamente' } );
 
         } catch(error){
-            console.log(`Error al procesar registro de cliente: ${error}`);
-            res.status(200).send( { codigo: 1, mensaje: `Error al procesar registro de cliente: ${error}`, token:'' } );
+            console.log(`Error al activar cuenta de cliente: ${error}`);
+            res.status(200).send( { codigo: 1, mensaje: `Error al activar cuenta de cliente: ${error}` } );
+        }
+    }
+) 
+
+
+//------------------------------------ FIN CONFIG PIPELINE: miiddleware-stack de express ---------------------------------------------
+
+
+
+//------------------------------------ CONFIG GOOGLE OAUTH2 ---------------------------------------------
+
+
+const { google }=require('googleapis');
+
+function crearClienteOAuthGoogle(){
+    const clientId=process.env.GOOGLE_OAUTH_CLIENT_ID || process.env.GOOGLE_OAUTH2_CLIENT_ID;
+    const clientSecret=process.env.GOOGLE_OAUTH_CLIENT_SECRET || process.env.GOOGLE_OAUTH2_CLIENT_SECRET;
+    const redirectUri=process.env.GOOGLE_OAUTH2_REDIRECT_URI
+        || 'http://localhost:3000/api/Cliente/LoginGoogleCallback';
+    if(!clientId || !clientSecret){
+        throw new Error('Faltan las credenciales OAuth de Google en .env');
+    }
+
+    return new google.auth.OAuth2(
+        clientId,
+        clientSecret,
+        redirectUri
+    );
+}
+
+function redirigirAReactConError(res,error){
+    const callbackUrl=new URL(GOOGLE_FRONTEND_CALLBACK_URL);
+    callbackUrl.searchParams.set('error', error.message || 'No se pudo iniciar sesión con Google');
+    return res.redirect(callbackUrl.toString());
+}
+
+webServer.get(
+    '/api/Cliente/LoginGoogle',
+    async function(req,res,next){
+        try{
+            const oauth2Client=crearClienteOAuthGoogle();
+            const state=crypto.randomBytes(32).toString('hex');
+
+            res.cookie('google_oauth_state', state, {
+                httpOnly: true,
+                sameSite: 'lax',
+                secure: process.env.NODE_ENV === 'production',
+                maxAge: 10 * 60 * 1000
+            });
+
+            const url=oauth2Client.generateAuthUrl({
+                access_type: 'offline',
+                scope: [
+                    'openid',
+                    'https://www.googleapis.com/auth/userinfo.email',
+                    'https://www.googleapis.com/auth/userinfo.profile',
+                    'https://www.googleapis.com/auth/user.phonenumbers.read'
+                ],
+                state
+            });
+
+            console.log('URL generada para login con Google OAuth2.0: ', url);
+            return res.status(200).send({
+                codigo: 0,
+                mensaje: 'login con Google generado',
+                datos: { url }
+            });
+        }catch(error){
+            console.log(`Error al iniciar login con Google: ${error}`);
+            return res.status(200).send({
+                codigo: 1,
+                mensaje: `Error al procesar login con Google OAuth2.0: ${error.message}`
+            });
         }
     }
 );
 
+webServer.get(
+    '/api/Cliente/LoginGoogleCallback',
+    async function(req,res,next){
+        try{
+            const { code, state, error: googleError }=req.query;
+            const stateCookie=req.cookies.google_oauth_state;
+            res.clearCookie('google_oauth_state');
 
+            if(googleError) throw new Error(`Google no autorizó el acceso: ${googleError}`);
+            if(!code) throw new Error('Google no devolvió el código de autorización');
+            if(!stateCookie || state !== stateCookie) throw new Error('El estado de autorización de Google no es válido');
 
+            const oauth2Client=crearClienteOAuthGoogle();
+            const { tokens }=await oauth2Client.getToken(code);
+            if(!tokens.id_token) throw new Error('Google no devolvió un token de identidad');
+
+            const ticket=await oauth2Client.verifyIdToken({
+                idToken: tokens.id_token,
+                audience: process.env.GOOGLE_OAUTH_CLIENT_ID || process.env.GOOGLE_OAUTH2_CLIENT_ID
+            });
+            const perfilGoogle=ticket.getPayload();
+            if(!perfilGoogle?.email || !perfilGoogle.email_verified){
+                throw new Error('La cuenta de Google no tiene un email verificado');
+            }
+
+            await clienteConexionMongoDB.connect();
+            const coleccionClientes=clienteConexionMongoDB.db(process.env.MONGODB_DBNAME).collection('clientes');
+            let cliente=await coleccionClientes.findOne({ 'cuenta.email': perfilGoogle.email });
+
+            if(!cliente){
+                const nombre=perfilGoogle.given_name || perfilGoogle.name || perfilGoogle.email.split('@')[0];
+                const insercion=await coleccionClientes.insertOne({
+                    nombre,
+                    apellidos: perfilGoogle.family_name || '',
+                    cuenta: {
+                        email: perfilGoogle.email,
+                        password: '',
+                        activada: true,
+                        telefono: ''
+                    },
+                    googleId: perfilGoogle.sub,
+                    direcciones: [],
+                    listaFavoritos: [],
+                    pedidos: []
+                });
+                cliente={ _id: insercion.insertedId, nombre, cuenta: { email: perfilGoogle.email } };
+            }else if(!cliente.cuenta?.activada){
+                await coleccionClientes.updateOne(
+                    { _id: cliente._id },
+                    { $set: { 'cuenta.activada': true, googleId: perfilGoogle.sub } }
+                );
+                cliente.cuenta.activada=true;
+            }
+
+            const token=jsonwebtoken.sign(
+                { email: cliente.cuenta.email, nombre: cliente.nombre, _id: cliente._id },
+                process.env.JWT_SECRET,
+                { expiresIn: '1h' }
+            );
+
+            const callbackUrl=new URL(GOOGLE_FRONTEND_CALLBACK_URL);
+            // Enviamos el JWT en el fragmento para que no se incluya en peticiones HTTP ni en logs del servidor.
+            callbackUrl.hash=new URLSearchParams({ token }).toString();
+            return res.redirect(callbackUrl.toString());
+        }catch(error){
+            console.log(`Error en el callback de login con Google: ${error}`);
+            return redirigirAReactConError(res,error);
+        }
+    }
+);
 //------------------------------------ FIN CONFIG PIPELINE: miiddleware-stack de express ---------------------------------------------
 webServer.listen(
     3000, //<--- puerto de escucha del servidor web, en nodejs suele ser 3000
