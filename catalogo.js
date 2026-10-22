@@ -50,6 +50,10 @@ function buildCategoryTree(categories) {
 function resolveCategoryPath(tree, slugPath) {
   const requested = String(slugPath ?? '').split('/').filter(Boolean);
   if (!requested.length || requested.some((part) => !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(part))) return null;
+  if (requested.length === 1 && /^\d+(?:-\d+)*$/.test(requested[0])) {
+    const exactPathMatches = flattenCategoryTree(tree).filter((category) => String(category.pathCat) === requested[0]);
+    return exactPathMatches.length === 1 ? exactPathMatches[0] : null;
+  }
   if (requested.length === 1) {
     const allCategories = flattenCategoryTree(tree);
     const globalMatches = allCategories.filter((category) => category.slug === requested[0] || slugify(categoryName(category)) === requested[0]);

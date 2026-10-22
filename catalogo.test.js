@@ -26,6 +26,8 @@ test('resolveCategoryPath resuelve ruta anidada y rechaza desconocida o inválid
   const tree = buildCategoryTree(categories);
   assert.equal(resolveCategoryPath(tree, 'ordenadores/portatiles').pathCat, '2-1');
   assert.equal(resolveCategoryPath(tree, 'portatiles').pathCat, '2-1');
+  assert.equal(resolveCategoryPath(tree, '2-1').pathCat, '2-1');
+  assert.equal(resolveCategoryPath(tree, '2-99'), null);
   assert.equal(resolveCategoryPath(tree, 'ordenadores/moviles'), null);
   assert.equal(resolveCategoryPath(tree, 'ordenadores/../secret'), null);
 });
@@ -40,6 +42,15 @@ test('resolveCategoryPath solo resuelve slugs globales cuando son únicos', () =
   assert.equal(resolveCategoryPath(tree, 'portatiles'), null);
   assert.equal(resolveCategoryPath(tree, 'ordenadores/portatiles').pathCat, '2-1');
   assert.equal(resolveCategoryPath(tree, 'accesorios/portatiles').pathCat, '4-1');
+});
+
+test('resolveCategoryPath rejects duplicated exact pathCat values', () => {
+  const tree = buildCategoryTree([
+    { nombre: 'Ordenadores', pathCat: '2' },
+    { nombre: 'Portátiles', pathCat: '2-1' },
+    { nombre: 'Duplicada', pathCat: '2-1' },
+  ]);
+  assert.equal(resolveCategoryPath(tree, '2-1'), null);
 });
 
 test('categoryProductFilter includes category and every descendant only when requested', () => {
