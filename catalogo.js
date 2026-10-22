@@ -50,14 +50,33 @@ function buildCategoryTree(categories) {
 function resolveCategoryPath(tree, slugPath) {
   const requested = String(slugPath ?? '').split('/').filter(Boolean);
   if (!requested.length || requested.some((part) => !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(part))) return null;
+  if (requested.length === 1) {
+    const allCategories = flattenCategoryTree(tree);
+    const globalMatches = allCategories.filter((category) => category.slug === requested[0] || slugify(categoryName(category)) === requested[0]);
+    return globalMatches.length === 1 ? globalMatches[0] : null;
+  }
   let siblings = tree;
   let selected = null;
   for (const slug of requested) {
-    selected = siblings.find((category) => category.slug === slug || slugify(categoryName(category)) === slug) || null;
-    if (!selected) return null;
+    const matches = siblings.filter((category) => category.slug === slug || slugify(categoryName(category)) === slug);
+    if (matches.length > 1) return null;
+    selected = matches[0] || null;
+    if (!selected) {
+      return null;
+    }
     siblings = selected.hijos || [];
   }
   return selected;
+}
+
+function flattenCategoryTree(tree) {
+  return tree.flatMap((category) => [category, ...flattenCategoryTree(category.hijos || [])]);
+}
+
+function categoryProductFilter(category, includeDescendants = false) {
+  if (!includeDescendants) return { pathCategoria: category.pathCat };
+  const paths = flattenCategoryTree([category]).map((item) => item.pathCat);
+  return { pathCategoria: { $in: paths } };
 }
 
 function productListing(product) {
@@ -79,4 +98,4 @@ async function findAllProducts(collection, filter, options) {
   return collection.find(filter, options).toArray();
 }
 
-module.exports = { slugify, categoryName, buildCategoryTree, resolveCategoryPath, productListing, findAllProducts };
+module.exports = { slugify, categoryName, buildCategoryTree, resolveCategoryPath, flattenCategoryTree, categoryProductFilter, productListing, findAllProducts };

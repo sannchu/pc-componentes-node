@@ -49,7 +49,7 @@ const cookieParser=require('cookie-parser'); //<--- el modulo "cookie-parser" ex
 const cors=require('cors'); //<--- el modulo "cors" exporta una funcion que asignamos a variable "cors",
 const jsonwebtoken=require('jsonwebtoken');  //<--- modulo para crear JWT de sesion de usuario
 const bcrypt=require('bcrypt'); //<--- modulo para hashear y comprobar hashes de passwords de usuarios
-const { buildCategoryTree, resolveCategoryPath, productListing, findAllProducts, categoryName } = require('./catalogo');
+const { buildCategoryTree, resolveCategoryPath, categoryProductFilter, productListing, findAllProducts, categoryName } = require('./catalogo');
 
 const webServer=express();
 
@@ -115,7 +115,8 @@ webServer.get('/api/Tienda/Productos', async function(req, res) {
         const category = resolveCategoryPath(tree, req.query.categoria);
         if (!category) return res.status(404).send({ codigo: 1, mensaje: 'Categoría no encontrada', productos: [] });
 
-        const filter = { pathCategoria: category.pathCat };
+        const includeDescendants = req.query.descendientes === 'true';
+        const filter = categoryProductFilter(category, includeDescendants);
         const collection = db.collection('productos');
         const projection = {
             nombre: 1, name: 1, nombreProd: 1, marca: 1, brand: 1, precio: 1, price: 1,

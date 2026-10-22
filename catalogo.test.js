@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { slugify, buildCategoryTree, resolveCategoryPath, productListing, findAllProducts } = require('./catalogo');
+const { slugify, buildCategoryTree, resolveCategoryPath, categoryProductFilter, productListing, findAllProducts } = require('./catalogo');
 
 const categories = [
   { nombre: 'Portátiles', pathCat: '2-1' },
@@ -25,8 +25,34 @@ test('buildCategoryTree conserva pathCat y ordena raíz e hijos', () => {
 test('resolveCategoryPath resuelve ruta anidada y rechaza desconocida o inválida', () => {
   const tree = buildCategoryTree(categories);
   assert.equal(resolveCategoryPath(tree, 'ordenadores/portatiles').pathCat, '2-1');
+  assert.equal(resolveCategoryPath(tree, 'portatiles').pathCat, '2-1');
   assert.equal(resolveCategoryPath(tree, 'ordenadores/moviles'), null);
   assert.equal(resolveCategoryPath(tree, 'ordenadores/../secret'), null);
+});
+
+test('resolveCategoryPath solo resuelve slugs globales cuando son únicos', () => {
+  const tree = buildCategoryTree([
+    ...categories,
+    { nombre: 'Portátiles', pathCat: '3-1' },
+    { nombre: 'Accesorios', pathCat: '4' },
+    { nombre: 'Portátiles', pathCat: '4-1' },
+  ]);
+  assert.equal(resolveCategoryPath(tree, 'portatiles'), null);
+  assert.equal(resolveCategoryPath(tree, 'ordenadores/portatiles').pathCat, '2-1');
+  assert.equal(resolveCategoryPath(tree, 'accesorios/portatiles').pathCat, '4-1');
+});
+
+test('categoryProductFilter includes category and every descendant only when requested', () => {
+  const tree = buildCategoryTree([
+    { nombre: 'Ordenadores', pathCat: '2' },
+    { nombre: 'Portátiles', pathCat: '2-1' },
+    { nombre: 'Por tipo', pathCat: '2-1-1' },
+    { nombre: 'Gaming', pathCat: '2-1-1-1' },
+    { nombre: 'Sobremesa', pathCat: '2-2' },
+  ]);
+  const computers = tree.find((item) => item.pathCat === '2');
+  assert.deepEqual(categoryProductFilter(computers), { pathCategoria: '2' });
+  assert.deepEqual(categoryProductFilter(computers, true), { pathCategoria: { $in: ['2', '2-1', '2-1-1', '2-1-1-1', '2-2'] } });
 });
 
 test('productListing limita la respuesta a campos de tarjeta y una imagen principal', () => {
@@ -71,4 +97,20 @@ test('findAllProducts no limita ni pagina y conserva todos los productos, inclui
   assert.equal(result.filter((product) => product.disponible === false).length, 68);
   assert.deepEqual(receivedFilter, expectedFilter);
   assert.deepEqual(receivedOptions, { projection: { nombre: 1 } });
+});
+
+test('findAllProducts utiliza el filtro de descendientes y devuelve todo sin disponibilidad como condición', async () => {
+  const expectedFilter = { pathCategoria: { $in: ['2', '2-1', '2-1-1'] } };
+  const products = Array.from({ length: 137 }, (_, index) => ({ _id: `d${index + 1}`, disponible: index % 2 === 0 }));
+  let receivedFilter;
+  const collection = {
+    find(filter) {
+      receivedFilter = filter;
+      return { toArray: async () => products };
+    },
+  };
+  const result = await findAllProducts(collection, expectedFilter);
+  assert.equal(result.length, 137);
+  assert.equal(result.filter((product) => product.disponible === false).length, 68);
+  assert.deepEqual(receivedFilter, expectedFilter);
 });
