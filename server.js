@@ -86,7 +86,7 @@ webServer.get(
                 .collection('categorias').find({}).toArray();
             const __categorias = buildCategoryTree(categoriasPlanas);
             //3º paso: devolver la respuesta al cliente con el resultado de la operacion contra la BD
-            console.log('Categorias recuperadas de la BD: ', __categorias);
+            console.log(`Categorías recuperadas: ${__categorias.length} raíces`);
 
             res.status(200).send(
                 {
@@ -122,7 +122,7 @@ webServer.get('/api/Tienda/Productos', async function(req, res) {
         const projection = {
             nombre: 1, name: 1, nombreProd: 1, marca: 1, brand: 1, precio: 1, price: 1,
             imagenPrincipal: 1, imagen: 1, image: 1, imagenes: { $slice: 1 }, images: { $slice: 1 },
-            galeria: { $slice: 1 }, valoraciones: 1, valoracionMedia: 1, valoracion: 1, rating: 1, numeroOpiniones: 1,
+            galeria: { $slice: 1 }, valoracionMedia: 1, numeroOpiniones: 1, disponible: 1,
         };
         const [total, documents] = await Promise.all([
             collection.countDocuments(filter),

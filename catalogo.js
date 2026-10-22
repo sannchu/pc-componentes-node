@@ -69,8 +69,9 @@ function productListing(product) {
     marca: product.marca ?? product.brand ?? '',
     precio: product.precio ?? product.price ?? null,
     imagen: typeof mainImage === 'object' && mainImage !== null ? (mainImage.url ?? mainImage.src ?? '') : (mainImage ?? ''),
-    valoraciones: product.valoraciones ?? product.valoracionMedia ?? product.valoracion ?? product.rating ?? null,
+    valoracionMedia: product.valoracionMedia ?? null,
     numeroOpiniones: product.numeroOpiniones ?? null,
+    ...(Object.prototype.hasOwnProperty.call(product, 'disponible') ? { disponible: product.disponible } : {}),
   };
 }
 

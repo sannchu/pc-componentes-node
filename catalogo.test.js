@@ -36,8 +36,11 @@ test('productListing limita la respuesta a campos de tarjeta y una imagen princi
     valoracionMedia: 4.7, numeroOpiniones: 18,
     disponible: false, especificaciones: { memoria: '16GB' }, reseñas: ['larga'],
   });
-  assert.deepEqual(listing, { _id: 'p1', nombre: 'Portátil', marca: 'Marca', precio: 799, imagen: '/main.jpg', valoraciones: 4.7, numeroOpiniones: 18 });
-  assert.equal('disponible' in listing, false);
+  assert.deepEqual(listing, { _id: 'p1', nombre: 'Portátil', marca: 'Marca', precio: 799, imagen: '/main.jpg', valoracionMedia: 4.7, numeroOpiniones: 18, disponible: false });
+  const withoutOptionalFields = productListing({ _id: 'p2', nombre: 'Otro portátil' });
+  assert.equal('disponible' in withoutOptionalFields, false);
+  assert.equal('valoracionMedia' in withoutOptionalFields, true);
+  assert.equal(withoutOptionalFields.valoracionMedia, null);
 });
 
 test('parsePagination aplica defaults y valida enteros positivos con máximo de límite', () => {
