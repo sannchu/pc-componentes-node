@@ -49,6 +49,7 @@ const cookieParser=require('cookie-parser'); //<--- el modulo "cookie-parser" ex
 const cors=require('cors'); //<--- el modulo "cors" exporta una funcion que asignamos a variable "cors",
 const jsonwebtoken=require('jsonwebtoken');  //<--- modulo para crear JWT de sesion de usuario
 const bcrypt=require('bcrypt'); //<--- modulo para hashear y comprobar hashes de passwords de usuarios
+const { buildCategoryTree, resolveCategoryPath, productListing, parsePagination, categoryName } = require('./catalogo');
 
 const webServer=express();
 
@@ -81,15 +82,9 @@ webServer.get(
             console.log(`Peticion entrante: ${req.method} ${req.url}`);
             //1º paso: conectarme a la BD, usando un cliente de conexion a MongoDB: mongodb<--- driver nativo para nodejs de mongodb
             await clienteConexionMongoDB.connect();
-            //2º paso: ejecutar la consulta a la BD de Mongodb para recuperar las categorias de productos(en un principio
-            //solo quiero las principales o raices, es decir, las q no tienen padre por encima)
-            // <--- query: db['PcComponentes'].categorias.find( { tipo:'...' } ) 
-            // <==== resultado: array de objetos a devolver al cliente en variable _categorias
-            let _queryRegExp=/^\d+$/
-            let __categorias=await clienteConexionMongoDB.db(process.env.MONGODB_DBNAME)
-                                                        .collection('categorias')
-                                                        .find({ pathCat: { $regex: _queryRegExp } })
-                                                        .toArray();                                                        
+            const categoriasPlanas = await clienteConexionMongoDB.db(process.env.MONGODB_DBNAME)
+                .collection('categorias').find({}).toArray();
+            const __categorias = buildCategoryTree(categoriasPlanas);
             //3º paso: devolver la respuesta al cliente con el resultado de la operacion contra la BD
             console.log('Categorias recuperadas de la BD: ', __categorias);
 
@@ -103,10 +98,50 @@ webServer.get(
 
         } catch(error){
             console.log(`Error al recuperar categorias de la BD: ${error}`);
-            res.status(200).send( { codigo: 1, mensaje: `Error al recuperar categorias de la BD: ${error}`, categorias:[] } );
+            res.status(500).send( { codigo: 1, mensaje: 'Error al recuperar categorias de la BD', categorias:[] } );
         }
     }
 )
+
+webServer.get('/api/Tienda/Productos', async function(req, res) {
+    const pagination = parsePagination(req.query);
+    if (!pagination) return res.status(400).send({ codigo: 1, mensaje: 'Parámetros pagina o limite inválidos', productos: [] });
+    if (typeof req.query.categoria !== 'string' || !req.query.categoria.trim()) {
+        return res.status(400).send({ codigo: 1, mensaje: 'El parámetro categoria es obligatorio', productos: [] });
+    }
+    try {
+        await clienteConexionMongoDB.connect();
+        const db = clienteConexionMongoDB.db(process.env.MONGODB_DBNAME);
+        const rawCategories = await db.collection('categorias').find({}).toArray();
+        const tree = buildCategoryTree(rawCategories);
+        const category = resolveCategoryPath(tree, req.query.categoria);
+        if (!category) return res.status(404).send({ codigo: 1, mensaje: 'Categoría no encontrada', productos: [] });
+
+        const filter = { pathCategoria: category.pathCat };
+        const collection = db.collection('productos');
+        const projection = {
+            nombre: 1, name: 1, nombreProd: 1, marca: 1, brand: 1, precio: 1, price: 1,
+            imagenPrincipal: 1, imagen: 1, image: 1, imagenes: { $slice: 1 }, images: { $slice: 1 },
+            galeria: { $slice: 1 }, valoraciones: 1, valoracionMedia: 1, valoracion: 1, rating: 1, numeroOpiniones: 1,
+        };
+        const [total, documents] = await Promise.all([
+            collection.countDocuments(filter),
+            collection.find(filter, { projection })
+                .skip((pagination.pagina - 1) * pagination.limite)
+                .limit(pagination.limite).toArray(),
+        ]);
+        return res.status(200).send({
+            codigo: 0,
+            mensaje: 'Productos recuperados correctamente',
+            categoria: { nombre: categoryName(category), slug: category.slug, pathCat: category.pathCat },
+            productos: documents.map(productListing),
+            paginacion: { pagina: pagination.pagina, limite: pagination.limite, total, totalPaginas: Math.ceil(total / pagination.limite) },
+        });
+    } catch (error) {
+        console.log(`Error al recuperar productos de la BD: ${error}`);
+        return res.status(500).send({ codigo: 1, mensaje: 'Error al recuperar productos de la BD', productos: [] });
+    }
+});
 
 webServer.post(
     '/api/Cliente/Registro',
