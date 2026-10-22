@@ -75,16 +75,8 @@ function productListing(product) {
   };
 }
 
-function parsePagination(query) {
-  const parse = (value, fallback, max) => {
-    if (value === undefined) return fallback;
-    if (!/^[1-9]\d*$/.test(String(value))) return null;
-    const number = Number(value);
-    return number <= max ? number : null;
-  };
-  const pagina = parse(query.pagina, 1, Number.MAX_SAFE_INTEGER);
-  const limite = parse(query.limite, 24, 100);
-  return pagina && limite && pagina <= Math.floor(Number.MAX_SAFE_INTEGER / limite) ? { pagina, limite } : null;
+async function findAllProducts(collection, filter, options) {
+  return collection.find(filter, options).toArray();
 }
 
-module.exports = { slugify, categoryName, buildCategoryTree, resolveCategoryPath, productListing, parsePagination };
+module.exports = { slugify, categoryName, buildCategoryTree, resolveCategoryPath, productListing, findAllProducts };

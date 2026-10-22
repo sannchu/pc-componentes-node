@@ -49,7 +49,7 @@ const cookieParser=require('cookie-parser'); //<--- el modulo "cookie-parser" ex
 const cors=require('cors'); //<--- el modulo "cors" exporta una funcion que asignamos a variable "cors",
 const jsonwebtoken=require('jsonwebtoken');  //<--- modulo para crear JWT de sesion de usuario
 const bcrypt=require('bcrypt'); //<--- modulo para hashear y comprobar hashes de passwords de usuarios
-const { buildCategoryTree, resolveCategoryPath, productListing, parsePagination, categoryName } = require('./catalogo');
+const { buildCategoryTree, resolveCategoryPath, productListing, findAllProducts, categoryName } = require('./catalogo');
 
 const webServer=express();
 
@@ -104,8 +104,6 @@ webServer.get(
 )
 
 webServer.get('/api/Tienda/Productos', async function(req, res) {
-    const pagination = parsePagination(req.query);
-    if (!pagination) return res.status(400).send({ codigo: 1, mensaje: 'Parámetros pagina o limite inválidos', productos: [] });
     if (typeof req.query.categoria !== 'string' || !req.query.categoria.trim()) {
         return res.status(400).send({ codigo: 1, mensaje: 'El parámetro categoria es obligatorio', productos: [] });
     }
@@ -124,18 +122,12 @@ webServer.get('/api/Tienda/Productos', async function(req, res) {
             imagenPrincipal: 1, imagen: 1, image: 1, imagenes: { $slice: 1 }, images: { $slice: 1 },
             galeria: { $slice: 1 }, valoracionMedia: 1, numeroOpiniones: 1, disponible: 1,
         };
-        const [total, documents] = await Promise.all([
-            collection.countDocuments(filter),
-            collection.find(filter, { projection })
-                .skip((pagination.pagina - 1) * pagination.limite)
-                .limit(pagination.limite).toArray(),
-        ]);
+        const documents = await findAllProducts(collection, filter, { projection });
         return res.status(200).send({
             codigo: 0,
             mensaje: 'Productos recuperados correctamente',
             categoria: { nombre: categoryName(category), slug: category.slug, pathCat: category.pathCat },
             productos: documents.map(productListing),
-            paginacion: { pagina: pagination.pagina, limite: pagination.limite, total, totalPaginas: Math.ceil(total / pagination.limite) },
         });
     } catch (error) {
         console.log(`Error al recuperar productos de la BD: ${error}`);

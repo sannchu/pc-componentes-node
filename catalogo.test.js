@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { slugify, buildCategoryTree, resolveCategoryPath, productListing, parsePagination } = require('./catalogo');
+const { slugify, buildCategoryTree, resolveCategoryPath, productListing, findAllProducts } = require('./catalogo');
 
 const categories = [
   { nombre: 'Portátiles', pathCat: '2-1' },
@@ -43,10 +43,32 @@ test('productListing limita la respuesta a campos de tarjeta y una imagen princi
   assert.equal(withoutOptionalFields.valoracionMedia, null);
 });
 
-test('parsePagination aplica defaults y valida enteros positivos con máximo de límite', () => {
-  assert.deepEqual(parsePagination({}), { pagina: 1, limite: 24 });
-  assert.deepEqual(parsePagination({ pagina: '2', limite: '100' }), { pagina: 2, limite: 100 });
-  assert.equal(parsePagination({ pagina: '0' }), null);
-  assert.equal(parsePagination({ limite: '101' }), null);
-  assert.equal(parsePagination({ pagina: '1.5' }), null);
+test('findAllProducts no limita ni pagina y conserva todos los productos, incluidos no disponibles', async () => {
+  const expectedFilter = { pathCategoria: '2-1' };
+  const products = Array.from({ length: 137 }, (_, index) => ({
+    _id: `p${index + 1}`,
+    nombre: `Portátil ${index + 1}`,
+    disponible: index % 2 === 0,
+  }));
+  let receivedFilter;
+  let receivedOptions;
+  const collection = {
+    find(filter, options) {
+      receivedFilter = filter;
+      receivedOptions = options;
+      return {
+        toArray: async () => products,
+        skip() { assert.fail('La consulta no debe paginar con skip'); },
+        limit() { assert.fail('La consulta no debe truncar con limit'); },
+      };
+    },
+  };
+
+  const result = await findAllProducts(collection, expectedFilter, { projection: { nombre: 1 } });
+  assert.equal(result.length, 137);
+  assert.equal(result[0]._id, 'p1');
+  assert.equal(result.at(-1)._id, 'p137');
+  assert.equal(result.filter((product) => product.disponible === false).length, 68);
+  assert.deepEqual(receivedFilter, expectedFilter);
+  assert.deepEqual(receivedOptions, { projection: { nombre: 1 } });
 });
