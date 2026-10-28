@@ -1,13 +1,12 @@
 {
-  "name": "pc-componentes-node",
+  "name": "pccomponentes-a__nodejs",
   "version": "1.0.0",
-  "description": "proyecto back para pc-componentes",
+  "description": "proyecto de back para portal pccomponentes con nodejs + express + mongodb",
   "license": "ISC",
   "author": "",
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {

@@ -1,17 +1,19 @@
 # pc-componentes-node
 
-Backend de PcComponentes desarrollado con Node.js y Express.
+Backend de PcComponentes con Node.js, Express y MongoDB.
 
-## Requisitos
+## Iniciar
 
-- Node.js
-- npm
-
-## Desarrollo
+Instala las dependencias y arranca el servidor:
 
 ```bash
 npm install
-npm start
+node server.js
 ```
 
-El servidor escucha en el puerto `3000`.
+El servidor escucha en `http://localhost:3000`. La configuración local se carga desde `.env`.
+
+## Catálogo
+
+- `GET /api/Tienda/Categorias?pathCat=principales` devuelve las categorías principales en `datos.categorias`. Para obtener las hijas de una categoría, pasa su `pathCat`, por ejemplo `?pathCat=2`.
+- `GET /api/Tienda/Productos?pathCat=2-1` devuelve en `datos.productos` los productos cuya propiedad `pathCategoria` coincide exactamente con ese `pathCat`.
